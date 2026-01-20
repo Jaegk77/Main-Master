@@ -1,0 +1,155 @@
+:root {
+  color-scheme: dark;
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #0a0f14;
+  color: #d9e1e8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  height: 100vh;
+}
+
+.app {
+  display: grid;
+  grid-template-columns: 2.5fr 1.5fr 1.5fr 1fr;
+  grid-template-rows: 1fr;
+  height: 100%;
+  gap: 12px;
+  padding: 12px;
+}
+
+.pane {
+  background: #0f1720;
+  border: 1px solid #1f2a36;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pane h2 {
+  margin: 0 0 8px;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #7ea0b7;
+}
+
+.scroll-list {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.task-item {
+  padding: 8px;
+  border-bottom: 1px solid #18212b;
+  cursor: pointer;
+}
+
+.task-item:last-child {
+  border-bottom: none;
+}
+
+.task-status {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #9fb3c8;
+}
+
+.navigator button {
+  background: #1b2430;
+  border: 1px solid #2a3b4b;
+  color: #d9e1e8;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  width: 100%;
+  cursor: pointer;
+  text-align: left;
+}
+
+.navigator button.active {
+  background: #28364a;
+  border-color: #3b5270;
+}
+
+.overlay {
+  position: fixed;
+  right: 24px;
+  top: 24px;
+  width: 360px;
+  height: calc(100vh - 48px);
+  background: #111a24;
+  border: 1px solid #2a3b4b;
+  border-radius: 12px;
+  padding: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
+.overlay header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.overlay header h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #b7c7d9;
+}
+
+.overlay button {
+  background: transparent;
+  border: 1px solid #2a3b4b;
+  color: #d9e1e8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.overlay pre {
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+.terminal-container {
+  flex: 1;
+  border: 1px solid #1f2a36;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.controls button {
+  background: #1b2430;
+  border: 1px solid #2a3b4b;
+  color: #d9e1e8;
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.mode-indicator {
+  font-size: 12px;
+  color: #7ea0b7;
+}
