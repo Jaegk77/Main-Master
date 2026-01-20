@@ -1,5 +1,5 @@
 interface ActivityPaneProps {
-  events: Array<Record<string, string | number>>;
+  events: Array<Record<string, string | number | undefined>>;
 }
 
 export default function ActivityPane({ events }: ActivityPaneProps) {
@@ -10,8 +10,9 @@ export default function ActivityPane({ events }: ActivityPaneProps) {
         {events.map((event, index) => (
           <div key={`${event.ts}-${index}`} className="task-item">
             <div className="task-status">{event.phase}</div>
+            <div>{event.ts}</div>
             <div>{event.tool}</div>
-            <div>{event.result}</div>
+            <div>{event.result ?? event.error}</div>
             <div>{event.duration_ms}ms</div>
           </div>
         ))}

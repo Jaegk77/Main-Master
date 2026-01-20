@@ -42,6 +42,7 @@ class RuntimeState:
     errors: List[str] = field(default_factory=list)
     mode: str = "idle"
     autopilot: bool = False
+    trace_enabled: bool = True
     budgets: Dict[str, int] = field(
         default_factory=lambda: {
             "max_tool_calls_per_tick": 5,
@@ -64,7 +65,14 @@ class AgentRuntime:
         self.logger = _setup_logger(self.logs_dir / "yesman.log")
         self.tasks_path = self.state_dir / "tasks.json"
         self.events_path = self.state_dir / "events.jsonl"
+        self.current_task_id: Optional[str] = None
+        self.last_plan: Optional[Dict[str, Any]] = None
+        self.last_assistant: Optional[str] = None
+        self.clarification_count = 0
         self._load_state()
+        if not self.state.tasks:
+            self._seed_bootstrap_task()
+            self._persist_tasks()
 
     @classmethod
     def get(cls, workspace_root: Path) -> "AgentRuntime":
@@ -101,6 +109,11 @@ class AgentRuntime:
         self.tasks_path.write_text(
             json.dumps([task.__dict__ for task in self.state.tasks], indent=2)
         )
+
+    def _append_event(self, event: TraceEvent) -> None:
+        self.state.events.append(event)
+        with self.events_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event.__dict__) + "\n")
 
     def _extract_tasks_payload(self, data: Any) -> Optional[List[TaskItem]]:
         tasks_data: Any
@@ -155,10 +168,15 @@ class AgentRuntime:
             )
         self.state.tasks = []
 
-    def _append_event(self, event: TraceEvent) -> None:
-        self.state.events.append(event)
-        with self.events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event.__dict__) + "\n")
+    def _seed_bootstrap_task(self) -> None:
+        task = TaskItem(
+            id=str(uuid.uuid4()),
+            title="Bootstrap UI sanity",
+            status="pending",
+            progress="0%",
+            details="Writes workspace/bootstrap_sanity.txt and verifies the pipeline.",
+        )
+        self.state.tasks.append(task)
 
     def _trace(
         self,
@@ -183,6 +201,162 @@ class AgentRuntime:
         self._append_event(event)
         return event
 
+    def submit_user_goal(self, text: str) -> Dict[str, Any]:
+        req_id = str(uuid.uuid4())
+        start = time.perf_counter()
+        plan = self._generate_plan(text)
+        self._trace(
+            phase="planning",
+            req_id=req_id,
+            duration_ms=_elapsed_ms(start),
+            tool="metta.plan",
+            args={"text": text},
+            result="plan_json_created",
+        )
+        clarification = self._needs_clarification(text)
+        if clarification and self.clarification_count < 2:
+            plan["requires_clarification"] = True
+            plan["clarification_questions"] = [clarification]
+            self.clarification_count += 1
+        else:
+            plan["requires_clarification"] = False
+
+        llm_start = time.perf_counter()
+        verbal, error = self._verbalize_plan(plan)
+        if error:
+            self.state.errors.append(error)
+        self._trace(
+            phase="verbalize",
+            req_id=req_id,
+            duration_ms=_elapsed_ms(llm_start),
+            tool="ollama.verbalize",
+            args={"model": "llama3"},
+            result=verbal[:120] if verbal else "fallback_response",
+            error=error,
+        )
+        task = self._create_task_from_goal(text, plan.get("requires_clarification", False))
+        if error or not verbal:
+            verbal = _fallback_response(plan, task)
+        if plan.get("requires_clarification"):
+            verbal = plan.get("clarification_questions", [verbal])[0]
+        self._persist_tasks()
+        self.last_plan = plan
+        self.last_assistant = verbal
+        return {
+            "req_id": req_id,
+            "plan": plan,
+            "assistant": verbal,
+            "task_id": task.id,
+        }
+
+    def tick(self) -> TraceEvent:
+        req_id = str(uuid.uuid4())
+        self.state.mode = "working"
+        start = time.perf_counter()
+        task = self._next_runnable_task()
+        if task is None:
+            self.state.mode = "idle"
+            return self._trace(
+                phase="tick",
+                req_id=req_id,
+                duration_ms=_elapsed_ms(start),
+                tool="runtime.tick",
+                args={"autopilot": self.state.autopilot},
+                result="no_runnable_tasks",
+            )
+        if task.status == "blocked":
+            self.state.mode = "blocked"
+            return self._trace(
+                phase="tick",
+                req_id=req_id,
+                duration_ms=_elapsed_ms(start),
+                tool="runtime.tick",
+                args={"task_id": task.id},
+                result="task_blocked",
+            )
+        task.status = "in_progress"
+        self.current_task_id = task.id
+        if task.title == "Bootstrap UI sanity":
+            self._run_bootstrap_task(task)
+        else:
+            task.progress = "50%"
+            task.details = "Task in progress. Next tick will continue."
+        self._persist_tasks()
+        self.state.mode = "idle"
+        return self._trace(
+            phase="tick",
+            req_id=req_id,
+            duration_ms=_elapsed_ms(start),
+            tool="runtime.tick",
+            args={"task_id": task.id},
+            result="tick_complete",
+        )
+
+    def stop(self) -> None:
+        self.state.autopilot = False
+        self.state.mode = "idle"
+        self.current_task_id = None
+
+    def set_autopilot(self, on: bool) -> None:
+        self.state.autopilot = on
+
+    def snapshot_state(self) -> Dict[str, Any]:
+        return {
+            "tasks": [task.__dict__ for task in self.state.tasks],
+            "events": [event.__dict__ for event in self.state.events[-200:]],
+            "docs": self.state.docs,
+            "errors": self.state.errors[-50:],
+            "mode": self.state.mode,
+            "autopilot": self.state.autopilot,
+            "budgets": self.state.budgets,
+            "trace_enabled": self.state.trace_enabled,
+            "plan": self.last_plan,
+        }
+
+    def read_workspace_file(self, path: str) -> str:
+        file_path = _safe_workspace_path(self.workspace_root, path)
+        return file_path.read_text()
+
+    def list_workspace_files(self) -> List[str]:
+        workspace = self.workspace_root
+        return [
+            str(path.relative_to(workspace))
+            for path in workspace.rglob("*")
+            if path.is_file()
+        ]
+
+    def has_runnable_tasks(self) -> bool:
+        return any(task.status in {"pending", "in_progress"} for task in self.state.tasks)
+
+    def _create_task_from_goal(self, text: str, blocked: bool) -> TaskItem:
+        task = TaskItem(
+            id=str(uuid.uuid4()),
+            title=text.strip()[:60] or "New task",
+            status="blocked" if blocked else "pending",
+            progress="0%",
+            details=(
+                "Needs clarification before proceeding."
+                if blocked
+                else "Auto-created from user message."
+            ),
+        )
+        self.state.tasks.append(task)
+        return task
+
+    def _next_runnable_task(self) -> Optional[TaskItem]:
+        for task in self.state.tasks:
+            if task.status in {"pending", "in_progress", "blocked"}:
+                return task
+        return None
+
+    def _run_bootstrap_task(self, task: TaskItem) -> None:
+        target = self.workspace_root / "bootstrap_sanity.txt"
+        content = f"Bootstrap ok at {datetime.now(timezone.utc).isoformat()}\n"
+        target.write_text(content)
+        task.status = "done"
+        task.progress = "100%"
+        task.details = "Wrote bootstrap_sanity.txt and verified pipeline."
+
     def _generate_plan(self, text: str) -> Dict[str, Any]:
         plan_id = str(uuid.uuid4())
         return {
@@ -201,17 +375,26 @@ class AgentRuntime:
                 },
                 {
                     "id": "step-3",
-                    "action": "await_next_tick",
-                    "note": "Pause until next cycle.",
+                    "action": "run_cycle",
+                    "note": "Run one agent cycle to advance tasks.",
                 },
             ],
             "requires_clarification": False,
         }
 
+    def _needs_clarification(self, text: str) -> Optional[str]:
+        stripped = text.strip()
+        if len(stripped) < 5:
+            return "Can you clarify the goal in one sentence?"
+        if "maybe" in stripped.lower():
+            return "Please clarify the concrete outcome you want."
+        return None
+
     def _verbalize_plan(self, plan: Dict[str, Any]) -> Tuple[str, Optional[str]]:
         prompt = (
             "You are Yesman. Only verbalize the given plan as a short status update. "
-            "Do not propose new plans.\n\nPlan JSON:\n"
+            "Do not propose new plans."
+            "\n\nPlan JSON:\n"
             + json.dumps(plan)
         )
         try:
@@ -229,92 +412,6 @@ class AgentRuntime:
             return data.get("response", ""), None
         except requests.RequestException as exc:
             return "", f"Ollama error: {exc}"
-
-    def handle_user_message(self, text: str) -> Tuple[Dict[str, Any], str]:
-        req_id = str(uuid.uuid4())
-        start = time.perf_counter()
-        plan = self._generate_plan(text)
-        self._trace(
-            phase="planning",
-            req_id=req_id,
-            duration_ms=_elapsed_ms(start),
-            tool="metta.plan",
-            args={"text": text},
-            result="plan_json_created",
-        )
-        llm_start = time.perf_counter()
-        verbal, error = self._verbalize_plan(plan)
-        if error:
-            self.state.errors.append(error)
-            verbal = (
-                "LLM unavailable. Derived status from plan: intent='"
-                + plan.get("intent", "")
-                + "'."
-            )
-        self._trace(
-            phase="verbalize",
-            req_id=req_id,
-            duration_ms=_elapsed_ms(llm_start),
-            tool="ollama.verbalize",
-            args={"model": "llama3"},
-            result=verbal[:120] if verbal else "fallback_response",
-            error=error,
-        )
-        self._update_tasks_from_intent(text)
-        self._persist_tasks()
-        return plan, verbal
-
-    def _update_tasks_from_intent(self, text: str) -> None:
-        task = TaskItem(
-            id=str(uuid.uuid4()),
-            title=text.strip()[:60] or "New task",
-            status="pending",
-            progress="0%",
-            details="Auto-created from user message.",
-        )
-        self.state.tasks.append(task)
-
-    def tick(self) -> None:
-        req_id = str(uuid.uuid4())
-        self.state.mode = "working"
-        start = time.perf_counter()
-        time.sleep(0.1)
-        if self.state.tasks:
-            task = self.state.tasks[0]
-            task.status = "in_progress"
-            task.progress = "50%"
-        self._trace(
-            phase="tick",
-            req_id=req_id,
-            duration_ms=_elapsed_ms(start),
-            tool="runtime.tick",
-            args={"autopilot": self.state.autopilot},
-            result="tick_complete",
-        )
-        self._persist_tasks()
-        self.state.mode = "idle"
-
-    def set_autopilot(self, on: bool) -> None:
-        self.state.autopilot = on
-
-    def get_state_snapshot(self) -> Dict[str, Any]:
-        return {
-            "tasks": [task.__dict__ for task in self.state.tasks],
-            "events": [event.__dict__ for event in self.state.events[-200:]],
-            "docs": self.state.docs,
-            "errors": self.state.errors[-50:],
-            "mode": self.state.mode,
-            "autopilot": self.state.autopilot,
-            "budgets": self.state.budgets,
-        }
-
-    def read_workspace_file(self, path: str) -> str:
-        file_path = _safe_workspace_path(self.workspace_root, path)
-        return file_path.read_text()
-
-    def list_workspace_files(self) -> List[str]:
-        workspace = self.workspace_root
-        return [str(path.relative_to(workspace)) for path in workspace.rglob("*") if path.is_file()]
 
 
 def _safe_workspace_path(workspace_root: Path, path: str) -> Path:
@@ -372,3 +469,9 @@ def _setup_logger(log_file: Path) -> logging.Logger:
         )
         logger.addHandler(handler)
     return logger
+
+
+def _fallback_response(plan: Dict[str, Any], task: TaskItem) -> str:
+    intent = plan.get("intent", "")
+    next_step = plan.get("steps", [{}])[2].get("note", "Next tick will advance the task.")
+    return f"Created task '{task.title}'. Intent: {intent}. Next: {next_step}"

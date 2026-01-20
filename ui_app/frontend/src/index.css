@@ -54,6 +54,7 @@ body {
 .task-item {
   padding: 8px;
   border-bottom: 1px solid #18212b;
+  cursor: pointer;
 }
 
 .task-item:last-child {

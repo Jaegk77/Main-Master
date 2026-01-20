@@ -2,9 +2,14 @@ import { useEffect, useRef } from 'react';
 import { Terminal } from 'xterm';
 import 'xterm/css/xterm.css';
 
+interface OutputLine {
+  id: string;
+  text: string;
+}
+
 interface TerminalPaneProps {
   onSend: (text: string) => void;
-  output: string[];
+  output: OutputLine[];
 }
 
 const PROMPT = '> ';
@@ -13,6 +18,7 @@ export default function TerminalPane({ onSend, output }: TerminalPaneProps) {
   const terminalRef = useRef<Terminal | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const bufferRef = useRef('');
+  const lastIndexRef = useRef(0);
 
   useEffect(() => {
     const term = new Terminal({
@@ -62,10 +68,14 @@ export default function TerminalPane({ onSend, output }: TerminalPaneProps) {
     if (!term) {
       return;
     }
-    output.forEach((line) => {
-      term.writeln(`\r\n${line}`);
-      term.write(PROMPT + bufferRef.current);
+    const newLines = output.slice(lastIndexRef.current);
+    newLines.forEach((line) => {
+      term.writeln(`\r\n${line.text}`);
     });
+    if (newLines.length > 0) {
+      term.write(PROMPT + bufferRef.current);
+      lastIndexRef.current = output.length;
+    }
   }, [output]);
 
   return <div className="terminal-container" ref={containerRef} />;

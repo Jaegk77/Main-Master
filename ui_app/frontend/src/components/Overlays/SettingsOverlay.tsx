@@ -1,10 +1,12 @@
 interface SettingsOverlayProps {
   budgets: Record<string, number>;
   model: string;
+  autopilot: boolean;
+  onAutopilot: (on: boolean) => void;
   onClose: () => void;
 }
 
-export default function SettingsOverlay({ budgets, model, onClose }: SettingsOverlayProps) {
+export default function SettingsOverlay({ budgets, model, autopilot, onAutopilot, onClose }: SettingsOverlayProps) {
   return (
     <div className="overlay">
       <header>
@@ -15,6 +17,14 @@ export default function SettingsOverlay({ budgets, model, onClose }: SettingsOve
         <div className="task-item">
           <strong>Model</strong>
           <div>{model}</div>
+        </div>
+        <div className="task-item">
+          <strong>Autopilot</strong>
+          <div>
+            <button type="button" onClick={() => onAutopilot(!autopilot)}>
+              {autopilot ? 'Disable' : 'Enable'}
+            </button>
+          </div>
         </div>
         <div className="task-item">
           <strong>Budgets</strong>

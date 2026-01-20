@@ -3,8 +3,10 @@ interface NavigatorPaneProps {
   onToggle: (name: string) => void;
   autopilot: boolean;
   mode: string;
+  connected: boolean;
   onTick: () => void;
   onAutopilot: (on: boolean) => void;
+  onStop: () => void;
 }
 
 const NAV_ITEMS = [
@@ -21,13 +23,16 @@ export default function NavigatorPane({
   onToggle,
   autopilot,
   mode,
+  connected,
   onTick,
-  onAutopilot
+  onAutopilot,
+  onStop
 }: NavigatorPaneProps) {
   return (
     <div className="pane navigator">
       <h2>Navigator</h2>
       <div className="mode-indicator">Mode: {mode}</div>
+      <div className="mode-indicator">Connection: {connected ? 'Connected' : 'Disconnected'}</div>
       <div className="controls">
         <button type="button" onClick={onTick}>
           Tick
@@ -37,7 +42,7 @@ export default function NavigatorPane({
         </button>
       </div>
       <div className="controls">
-        <button type="button" onClick={() => onAutopilot(false)}>
+        <button type="button" onClick={onStop}>
           Stop
         </button>
       </div>
