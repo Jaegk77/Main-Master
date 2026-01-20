@@ -10,7 +10,7 @@ Local-only terminal-style UI for Yesman. The backend binds to `127.0.0.1` and **
 ## Backend
 
 ```bash
-cd ui_app/backend
+cd export/backend
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -27,7 +27,7 @@ Logs are written to `workspace/logs/yesman.log`.
 ## Frontend
 
 ```bash
-cd ui_app/frontend
+cd export/frontend
 npm install
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
@@ -39,7 +39,7 @@ Open http://127.0.0.1:5173 in your browser.
 Terminal 1:
 
 ```bash
-cd ui_app/backend
+cd export/backend
 source .venv/bin/activate
 uvicorn app:app --host 127.0.0.1 --port 8000
 ```
@@ -47,14 +47,14 @@ uvicorn app:app --host 127.0.0.1 --port 8000
 Terminal 2:
 
 ```bash
-cd ui_app/frontend
+cd export/frontend
 npm run dev -- --host 127.0.0.1 --port 5173
 ```
 
 ## Optional helper script
 
 ```bash
-./ui_app/run.sh
+./export/run.sh
 ```
 
 The script starts the backend and frontend in the foreground (two processes). Use `Ctrl+C` to stop both.
