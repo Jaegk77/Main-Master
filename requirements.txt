@@ -1,0 +1,5 @@
+hyperon
+requests
+beautifulsoup4
+feedparser
+rich
